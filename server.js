@@ -13,7 +13,7 @@ import { spawn } from "child_process";
 import { fileURLToPath } from "url";
 
 // --------------------------------------------------
-// PATHS
+// PATH SETUP
 // --------------------------------------------------
 
 const __filename = fileURLToPath(import.meta.url);
@@ -58,35 +58,41 @@ await app.register(fastifyStatic, {
 // HELPERS
 // --------------------------------------------------
 
-function safeFilename(name) {
-  const ext = path.extname(name);
+function safeFilename(originalName = "audio.mp3") {
+  const ext = path.extname(originalName) || ".mp3";
 
-  const id = crypto.randomBytes(8).toString("hex");
+  const random = crypto.randomBytes(8).toString("hex");
 
-  return `${Date.now()}-${id}${ext}`;
+  return `${Date.now()}-${random}${ext}`;
 }
 
 function cleanup(...files) {
   for (const file of files) {
+    if (!file) continue;
+
     fs.unlink(file, () => {});
   }
 }
 
 function runFFmpeg(input, output) {
   return new Promise((resolve, reject) => {
+    const filters = [
+      "highpass=f=30",
+      "lowpass=f=18000",
+      "acompressor=threshold=-16dB:ratio=2:attack=20:release=200",
+      "loudnorm=I=-14:TP=-1.5:LRA=11",
+    ].join(",");
+
     const args = [
       "-y",
 
       "-i",
       input,
 
+      "-vn",
+
       "-af",
-      [
-        "highpass=f=30",
-        "lowpass=f=18000",
-        "acompressor=threshold=-16dB:ratio=2:attack=20:release=200",
-        "loudnorm=I=-14:TP=-1.5:LRA=11",
-      ].join(","),
+      filters,
 
       "-ar",
       "44100",
@@ -97,19 +103,23 @@ function runFFmpeg(input, output) {
       output,
     ];
 
-    const ffmpeg = spawn("ffmpeg", args, {
-      windowsHide: true,
-    });
+    const ffmpeg = spawn("ffmpeg", args);
 
     let stderr = "";
 
     const timeout = setTimeout(() => {
       ffmpeg.kill("SIGKILL");
-      reject(new Error("FFmpeg timeout"));
+
+      reject(new Error("FFmpeg processing timeout"));
     }, 1000 * 60 * 5);
 
     ffmpeg.stderr.on("data", (data) => {
       stderr += data.toString();
+    });
+
+    ffmpeg.on("error", (err) => {
+      clearTimeout(timeout);
+      reject(err);
     });
 
     ffmpeg.on("close", (code) => {
@@ -117,27 +127,22 @@ function runFFmpeg(input, output) {
 
       if (code !== 0) {
         return reject(
-          new Error(`FFmpeg exited with code ${code}\n${stderr}`)
+          new Error(`FFmpeg failed with code ${code}\n${stderr}`)
         );
       }
 
       resolve();
     });
-
-    ffmpeg.on("error", (err) => {
-      clearTimeout(timeout);
-      reject(err);
-    });
   });
 }
 
 // --------------------------------------------------
-// HEALTH
+// ROUTES
 // --------------------------------------------------
 
 app.get("/", async () => {
   return {
-    status: "Audio backend running",
+    status: "Audio mastering backend online",
   };
 });
 
@@ -145,11 +150,12 @@ app.get("/health", async () => {
   return {
     status: "ok",
     uptime: process.uptime(),
+    memory: process.memoryUsage(),
   };
 });
 
 // --------------------------------------------------
-// MASTER
+// MASTER ENDPOINT
 // --------------------------------------------------
 
 app.post("/master", async (req, reply) => {
@@ -166,7 +172,7 @@ app.post("/master", async (req, reply) => {
     }
 
     // ----------------------------------------------
-    // VALIDATION
+    // MIME VALIDATION
     // ----------------------------------------------
 
     const allowedMime = [
@@ -198,7 +204,7 @@ app.post("/master", async (req, reply) => {
     processedPath = path.join(processedDir, processedName);
 
     // ----------------------------------------------
-    // STREAM SAVE
+    // SAVE FILE STREAM
     // ----------------------------------------------
 
     await pipeline(
@@ -206,13 +212,15 @@ app.post("/master", async (req, reply) => {
       fs.createWriteStream(uploadPath)
     );
 
-    req.log.info(`UPLOAD SAVED: ${uploadPath}`);
+    req.log.info(`Upload saved: ${uploadPath}`);
 
     // ----------------------------------------------
     // PROCESS AUDIO
     // ----------------------------------------------
 
     await runFFmpeg(uploadPath, processedPath);
+
+    req.log.info(`Master complete: ${processedPath}`);
 
     // ----------------------------------------------
     // AUTO CLEANUP
@@ -224,8 +232,8 @@ app.post("/master", async (req, reply) => {
 
     return {
       success: true,
-      downloadUrl: `/files/${processedName}`,
       file: processedName,
+      downloadUrl: `/files/${processedName}`,
     };
   } catch (err) {
     req.log.error(err);
@@ -234,13 +242,13 @@ app.post("/master", async (req, reply) => {
 
     return reply.code(500).send({
       error: "Processing failed",
-      details: err.message,
+      details: err.message || String(err),
     });
   }
 });
 
 // --------------------------------------------------
-// START
+// START SERVER
 // --------------------------------------------------
 
 const PORT = process.env.PORT || 3001;
@@ -251,8 +259,9 @@ try {
     host: "0.0.0.0",
   });
 
-  console.log(`Server running on ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 } catch (err) {
   app.log.error(err);
+
   process.exit(1);
 }
