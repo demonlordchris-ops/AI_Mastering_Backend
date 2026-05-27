@@ -22,13 +22,13 @@ app.register(multipart, {
     fileSize: 100 * 1024 * 1024, // 100MB
     files: 1,
   },
-});
+}),
 
 // -------------------- PLUGINS --------------------
 app.register(cors, {
   const PORT = Number(process.env.PORT) || 3001;
 
-app.listen({
+app,listen({
   port: PORT,
   host: "0.0.0.0",
 });
