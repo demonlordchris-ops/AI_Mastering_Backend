@@ -1,23 +1,15 @@
 FROM node:20
 
-# Install FFmpeg
 RUN apt-get update && apt-get install -y ffmpeg
 
-# Create app directory
 WORKDIR /app
 
-# Copy dependency files first (better caching)
 COPY package*.json ./
 
-# Install dependencies
 RUN npm install
 
-# Copy rest of your app
 COPY . .
 
-# Build Next.js (if you're using it)
-RUN npm run build
+EXPOSE 3001
 
-# Start app
-CMD ["npm", "start"]
-
+CMD ["node", "server.js"]

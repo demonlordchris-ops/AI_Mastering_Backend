@@ -5,44 +5,140 @@ import fastifyStatic from "@fastify/static";
 
 import fs from "fs";
 import path from "path";
-import { exec } from "child_process";
-import ffmpeg from "ffmpeg";
+import crypto from "crypto";
+
+import { pipeline } from "stream/promises";
+import { spawn } from "child_process";
+
 import { fileURLToPath } from "url";
 
-// -------------------- PATH SETUP --------------------
+// --------------------------------------------------
+// PATHS
+// --------------------------------------------------
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// -------------------- APP --------------------
-const app = Fastify({
-  logger: true,
-});
-
-// -------------------- DIRECTORIES --------------------
 const uploadDir = path.join(__dirname, "uploads");
 const processedDir = path.join(__dirname, "processed");
 
 fs.mkdirSync(uploadDir, { recursive: true });
 fs.mkdirSync(processedDir, { recursive: true });
 
-// -------------------- PLUGINS --------------------
-app.register(cors, { origin: true });
+// --------------------------------------------------
+// APP
+// --------------------------------------------------
 
-app.register(multipart, {
+const app = Fastify({
+  logger: true,
+  bodyLimit: 100 * 1024 * 1024,
+});
+
+// --------------------------------------------------
+// PLUGINS
+// --------------------------------------------------
+
+await app.register(cors, {
+  origin: true,
+});
+
+await app.register(multipart, {
   limits: {
     fileSize: 100 * 1024 * 1024,
     files: 1,
   },
 });
 
-app.register(fastifyStatic, {
+await app.register(fastifyStatic, {
   root: processedDir,
   prefix: "/files/",
 });
 
-// -------------------- HEALTH --------------------
+// --------------------------------------------------
+// HELPERS
+// --------------------------------------------------
+
+function safeFilename(name) {
+  const ext = path.extname(name);
+
+  const id = crypto.randomBytes(8).toString("hex");
+
+  return `${Date.now()}-${id}${ext}`;
+}
+
+function cleanup(...files) {
+  for (const file of files) {
+    fs.unlink(file, () => {});
+  }
+}
+
+function runFFmpeg(input, output) {
+  return new Promise((resolve, reject) => {
+    const args = [
+      "-y",
+
+      "-i",
+      input,
+
+      "-af",
+      [
+        "highpass=f=30",
+        "lowpass=f=18000",
+        "acompressor=threshold=-16dB:ratio=2:attack=20:release=200",
+        "loudnorm=I=-14:TP=-1.5:LRA=11",
+      ].join(","),
+
+      "-ar",
+      "44100",
+
+      "-b:a",
+      "320k",
+
+      output,
+    ];
+
+    const ffmpeg = spawn("ffmpeg", args, {
+      windowsHide: true,
+    });
+
+    let stderr = "";
+
+    const timeout = setTimeout(() => {
+      ffmpeg.kill("SIGKILL");
+      reject(new Error("FFmpeg timeout"));
+    }, 1000 * 60 * 5);
+
+    ffmpeg.stderr.on("data", (data) => {
+      stderr += data.toString();
+    });
+
+    ffmpeg.on("close", (code) => {
+      clearTimeout(timeout);
+
+      if (code !== 0) {
+        return reject(
+          new Error(`FFmpeg exited with code ${code}\n${stderr}`)
+        );
+      }
+
+      resolve();
+    });
+
+    ffmpeg.on("error", (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+  });
+}
+
+// --------------------------------------------------
+// HEALTH
+// --------------------------------------------------
+
 app.get("/", async () => {
-  return { status: "Audio backend running" };
+  return {
+    status: "Audio backend running",
+  };
 });
 
 app.get("/health", async () => {
@@ -52,74 +148,111 @@ app.get("/health", async () => {
   };
 });
 
-// -------------------- MASTER ROUTE --------------------
+// --------------------------------------------------
+// MASTER
+// --------------------------------------------------
+
 app.post("/master", async (req, reply) => {
+  let uploadPath = null;
+  let processedPath = null;
+
   try {
     const file = await req.file();
 
     if (!file) {
-      return reply.code(400).send({ error: "No file uploaded" });
-    }
-
-    if (!file.mimetype.includes("audio")) {
-      return reply.code(400).send({ error: "Only audio files allowed" });
-    }
-
-    const fileName = `${Date.now()}-${file.filename}`;
-    const uploadPath = path.join(uploadDir, fileName);
-
-    const processedFileName = `mastered-${fileName}`;
-    const processedPath = path.join(processedDir, processedFileName);
-
-    // Save upload
-    const buffer = await file.toBuffer();
-    await fs.promises.writeFile(uploadPath, buffer);
-
-    console.log("UPLOAD SAVED:", uploadPath);
-
-    // -------------------- FFmpeg --------------------
-    const cmd = `"${ffmpeg}" -y -i "${uploadPath}" -af "loudnorm=I=-14:TP=-1.5:LRA=11,acompressor" "${processedPath}"`;
-
-    await new Promise((resolve, reject) => {
-      exec(cmd, (err, stdout, stderr) => {
-        if (err) {
-          console.error("FFMPEG ERROR:", stderr);
-          return reject(err);
-        }
-        resolve();
+      return reply.code(400).send({
+        error: "No file uploaded",
       });
-    });
+    }
 
-    // cleanup after 10 minutes
+    // ----------------------------------------------
+    // VALIDATION
+    // ----------------------------------------------
+
+    const allowedMime = [
+      "audio/mpeg",
+      "audio/wav",
+      "audio/x-wav",
+      "audio/flac",
+      "audio/mp4",
+      "audio/aac",
+      "audio/ogg",
+    ];
+
+    if (!allowedMime.includes(file.mimetype)) {
+      return reply.code(400).send({
+        error: "Unsupported audio format",
+      });
+    }
+
+    // ----------------------------------------------
+    // SAFE FILENAMES
+    // ----------------------------------------------
+
+    const uploadName = safeFilename(file.filename);
+
+    const processedName = `mastered-${uploadName}.mp3`;
+
+    uploadPath = path.join(uploadDir, uploadName);
+
+    processedPath = path.join(processedDir, processedName);
+
+    // ----------------------------------------------
+    // STREAM SAVE
+    // ----------------------------------------------
+
+    await pipeline(
+      file.file,
+      fs.createWriteStream(uploadPath)
+    );
+
+    req.log.info(`UPLOAD SAVED: ${uploadPath}`);
+
+    // ----------------------------------------------
+    // PROCESS AUDIO
+    // ----------------------------------------------
+
+    await runFFmpeg(uploadPath, processedPath);
+
+    // ----------------------------------------------
+    // AUTO CLEANUP
+    // ----------------------------------------------
+
     setTimeout(() => {
-      fs.unlink(uploadPath, () => {});
-      fs.unlink(processedPath, () => {});
-    }, 1000 * 60 * 10);
+      cleanup(uploadPath, processedPath);
+    }, 1000 * 60 * 15);
 
     return {
       success: true,
-      original: fileName,
-      mastered: processedFileName,
-      downloadUrl: `/files/${processedFileName}`,
+      downloadUrl: `/files/${processedName}`,
+      file: processedName,
     };
   } catch (err) {
-    console.error("MASTERING FAILED:", err);
+    req.log.error(err);
+
+    cleanup(uploadPath, processedPath);
 
     return reply.code(500).send({
       error: "Processing failed",
-      details: err.message || String(err),
+      details: err.message,
     });
   }
 });
 
-// -------------------- START SERVER --------------------
+// --------------------------------------------------
+// START
+// --------------------------------------------------
+
 const PORT = process.env.PORT || 3001;
 
-app.listen({ port: PORT, host: "0.0.0.0" }, (err, address) => {
-  if (err) {
-    console.error(err);
-    process.exit(1);
-  }
+try {
+  await app.listen({
+    port: PORT,
+    host: "0.0.0.0",
+  });
 
-  console.log(`Server running at ${address}`);
-});
+  console.log(`Server running on ${PORT}`);
+} catch (err) {
+  app.log.error(err);
+  process.exit(1);
+}
