@@ -6,7 +6,7 @@ import fastifyStatic from "@fastify/static";
 import fs from "fs";
 import path from "path";
 import { exec } from "child_process";
-import ffmpeg from "ffmpeg-static";
+import ffmpeg from "ffmpeg";
 import { fileURLToPath } from "url";
 
 // -------------------- PATH SETUP --------------------
