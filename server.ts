@@ -23,11 +23,7 @@ app.register(multipart, {
     files: 1,
   },
 });
-if (!file.mimetype.includes("audio")) {
-  return reply.code(400).send({
-    error: "Only audio files allowed",
-  });
-}
+
 // -------------------- PLUGINS --------------------
 app.register(cors, {
   origin: ["http://localhost:3000", "http://127.0.0.1:3000"],
@@ -50,13 +46,18 @@ app.get("/", async () => {
 
 // -------------------- MASTER ROUTE --------------------
 app.post("/master", async (req, reply) => {
+
   try {
     const file = await req.file();
-
+    
     if (!file) {
       return reply.code(400).send({ error: "No file uploaded" });
     }
-
+    if (!file.mimetype.includes("audio")) {
+  return reply.code(400).send({
+    error: "Only audio files allowed",
+  });
+}
     const fileName = `${Date.now()}-${file.filename}`;
     const uploadPath = path.join(uploadDir, fileName);
 
