@@ -26,7 +26,11 @@ app.register(multipart, {
 
 // -------------------- PLUGINS --------------------
 app.register(cors, {
-  origin: ["http://localhost:3000", "http://127.0.0.1:3000"],
+  const PORT = Number(process.env.PORT) || 3001;
+
+app.listen({
+  port: PORT,
+  host: "0.0.0.0",
 });
 const uploadDir = path.join(__dirname, "uploads");
 const processedDir = path.join(__dirname, "processed");
@@ -89,7 +93,7 @@ app.post("/master", async (req, reply) => {
       success: true,
       original: fileName,
       mastered: processedFileName,
-      downloadUrl: `http://localhost:3001/files/${processedFileName}`,
+      downloadUrl: `https://ai-mastering-backend.onrender.com${processedFileName}`,
     };
   } catch (err: any) {
     console.error("MASTERING FAILED:", err);
