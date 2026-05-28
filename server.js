@@ -189,7 +189,7 @@ function processJob(jobId, inputPath, outputPath) {
       status: JobStatus.ERROR,
       error: err.message,
     });
-  });
+  })
 }
 
     // -------------------------------
