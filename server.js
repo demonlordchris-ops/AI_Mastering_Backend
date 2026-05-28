@@ -95,21 +95,6 @@ function cleanup(...files) {
 }
 
 ```js
-function safeFilename(originalName = "audio.mp3") {
-  const ext = path.extname(originalName) || ".mp3";
-
-  const random = crypto.randomBytes(8).toString("hex");
-
-  return `${Date.now()}-${random}${ext}`;
-}
-
-function cleanup(...files) {
-  for (const file of files) {
-    if (!file) continue;
-
-    fs.unlink(file, () => {});
-  }
-}
 
 function processJob(jobId, inputPath, outputPath) {
   const filters = [
