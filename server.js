@@ -94,8 +94,6 @@ function cleanup(...files) {
   }
 }
 
-```js
-
 function processJob(jobId, inputPath, outputPath) {
   const filters = [
     "highpass=f=30",
@@ -127,71 +125,19 @@ function processJob(jobId, inputPath, outputPath) {
 
   const timeout = setTimeout(() => {
     console.error("FFmpeg timeout for job", jobId);
-
     ffmpeg.kill("SIGKILL");
-
-    const currentJob = jobs.get(jobId);
-
-    if (!currentJob) return;
-
-    jobs.set(jobId, {
-      ...currentJob,
-      status: JobStatus.ERROR,
-      error: "Processing timeout",
-    });
-   
   }, 1000 * 60 * 5);
 
-  let progress = 0;
-
-  ffmpeg.stdout.on("data", () => {
-    progress = Math.min(progress + 5, 95);
-
-    const currentJob = jobs.get(jobId);
-
-    if (!currentJob) return;
-
-    jobs.set(jobId, {
-      ...currentJob,
-      progress,
-    });
+  ffmpeg.on("close", () => {
+    activeJobs = Math.max(0, activeJobs - 1);
+    clearTimeout(timeout);
   });
 
-  ffmpeg.stderr.on("data", (data) => {
-    console.log(data.toString());
+  ffmpeg.on("error", () => {
+    activeJobs = Math.max(0, activeJobs - 1);
+    clearTimeout(timeout);
   });
-
-  ffmpeg.on("close", (code) => {
-    activeJobs = Math.max(0, activeJobs - 1);
-
-    clearTimeout(timeout);
-
-    const currentJob = jobs.get(jobId);
-
-    cleanup(inputPath, outputPath);
-
-    if (!currentJob) return;
-
-    if (code === 0) {
-      jobs.set(jobId, {
-        ...currentJob,
-        status: JobStatus.DONE,
-        progress: 100,
-        error: null,
-      });
-    } else {
-      jobs.set(jobId, {
-        ...currentJob,
-        status: JobStatus.ERROR,
-        error: "FFmpeg processing failed",
-      });
-    }
-  };
-
-  ffmpeg.on("error", (err) => {
-    activeJobs = Math.max(0, activeJobs - 1);
-
-    clearTimeout(timeout);
+}
 
     cleanup(inputPath, outputPath);
 
@@ -221,7 +167,7 @@ function processJob(jobId, inputPath, outputPath) {
       ...jobs.get(jobId),
       status: JobStatus.PROCESSING,
     });
-}
+
     // -------------------------------
     // START FFMPEG
     // -------------------------------
