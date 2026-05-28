@@ -132,25 +132,21 @@ function processJob(jobId, inputPath, outputPath) {
     outputPath,
   ];
 
-  const ffmpeg = spawn("ffmpeg", args);
-activeJobs++;
-const timeout = setTimeout(() => {
-  console.error(`FFmpeg timeout for job ${jobId}`);
-
-  ffmpeg.kill("SIGKILL");
-
-  const currentJob = jobs.get(jobId);
-
-  if (!currentJob) return;
-
-  jobs.set(jobId, {
-    ...currentJob,
-    status: JobStatus.ERROR,
-    error: "Processing timeout",
-  });
-
+function processJob(jobId, inputPath, outputPath) {
+ const ffmpeg = spawn("ffmpeg", args);
+  activeJobs++;
+   const timeout = setTimeout(() => {
+    console.error(`FFmpeg timeout for job ${jobId}`);
+     ffmpeg.kill("SIGKILL");
+      const currentJob = jobs.get(jobId);
+       if (!currentJob) return;
+        jobs.set(jobId, {
+         ...currentJob,
+          status: JobStatus.ERROR,
+           error: "Processing timeout",
+});
 }, 1000 * 60 * 5);
-  let progress = 0;
+let progress = 0;
 
   ffmpeg.stdout.on("data", () => {
     progress = Math.min(progress + 5, 95);
