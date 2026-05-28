@@ -261,26 +261,30 @@ app.post("/master", async (req, reply) => {
       "audio/aac",
       "audio/ogg",
     ];
-const allowedExtensions = [
-  ".mp3",
-  ".wav",
-  ".flac",
-  ".m4a",
-  ".aac",
-  ".ogg",
-];
+
+    const allowedExtensions = [
+      ".mp3",
+      ".wav",
+      ".flac",
+      ".m4a",
+      ".aac",
+      ".ogg",
+    ];
+
     if (!allowedMime.includes(file.mimetype)) {
       return reply.code(400).send({
         error: "Unsupported audio format",
       });
     }
-const ext = path.extname(file.filename).toLowerCase();
 
-if (!allowedExtensions.includes(ext)) {
-  return reply.code(400).send({
-    error: "Unsupported file extension",
-  });
-}
+    const ext = path.extname(file.filename).toLowerCase();
+
+    if (!allowedExtensions.includes(ext)) {
+      return reply.code(400).send({
+        error: "Unsupported file extension",
+      });
+    }
+
     const jobId = crypto.randomUUID();
 
     const uploadName = safeFilename(file.filename);
