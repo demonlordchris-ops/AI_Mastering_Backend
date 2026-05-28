@@ -139,7 +139,7 @@ function processJob(jobId, inputPath, outputPath) {
       status: JobStatus.ERROR,
       error: "Processing timeout",
     });
-
+   
   }, 1000 * 60 * 5);
 
   let progress = 0;
@@ -204,7 +204,7 @@ function processJob(jobId, inputPath, outputPath) {
       status: JobStatus.ERROR,
       error: err.message,
     });
-  })
+  });
 };
 
     // -------------------------------
@@ -234,13 +234,6 @@ function processJob(jobId, inputPath, outputPath) {
 
 app.post("/master", async (req, reply) => {
   try {
-
-    if (activeJobs >= MAX_CONCURRENT_JOBS) {
-      return reply.code(503).send({
-        error: "Server busy. Try again shortly.",
-      });
-    }
-
     const file = await req.file();
 
     if (!file) {
@@ -285,11 +278,9 @@ app.post("/master", async (req, reply) => {
     const jobId = crypto.randomUUID();
 
     const uploadName = safeFilename(file.filename);
-
     const outputName = "mastered-" + uploadName + ".mp3";
 
     const uploadPath = path.join(uploadDir, uploadName);
-
     const outputPath = path.join(processedDir, outputName);
 
     jobs.set(jobId, {
@@ -300,10 +291,7 @@ app.post("/master", async (req, reply) => {
       error: null,
     });
 
-    await pipeline(
-      file.file,
-      fs.createWriteStream(uploadPath)
-    );
+    await pipeline(file.file, fs.createWriteStream(uploadPath));
 
     jobs.set(jobId, {
       ...jobs.get(jobId),
