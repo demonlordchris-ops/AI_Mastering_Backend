@@ -221,7 +221,7 @@ function processJob(jobId, inputPath, outputPath) {
       ...jobs.get(jobId),
       status: JobStatus.PROCESSING,
     });
-
+}
     // -------------------------------
     // START FFMPEG
     // -------------------------------
