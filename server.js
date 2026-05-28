@@ -217,17 +217,27 @@ app.get("/health", async () => {
     memory: process.memoryUsage(),
   };
 });
+app.post("/master", async (req, reply) => {
+  try {
+    const file = await req.file();
 
+    if (!file) {
+      return reply.code(400).send({ error: "No file uploaded" });
+    }
+
+    return {
+      ok: true,
+    };
+
+  } catch (err) {
+    return reply.code(500).send({
+      error: err.message,
+    });
+  }
+});
 // --------------------------------------------------
 // MASTER ENDPOINT
 // --------------------------------------------------
-
-app.post("/master", async (req, reply) => {
-  const file = await req.file();
-
-  if (!file) {
-    return reply.code(400).send({ error: "No file uploaded" });
-  }
 
   const jobId = crypto.randomUUID();
 
