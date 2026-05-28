@@ -7,18 +7,10 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 
-import { pipeline } from "stream/promises";
 import { spawn } from "child_process";
+import { pipeline } from "stream/promises";
 
 import { fileURLToPath } from "url";
-const jobs = new Map();
-
-const JobStatus = {
-  QUEUED: "queued",
-  PROCESSING: "processing",
-  DONE: "done",
-  ERROR: "error",
-};
 
 // --------------------------------------------------
 // PATH SETUP
@@ -34,7 +26,7 @@ fs.mkdirSync(uploadDir, { recursive: true });
 fs.mkdirSync(processedDir, { recursive: true });
 
 // --------------------------------------------------
-// APP
+// FASTIFY APP
 // --------------------------------------------------
 
 const app = Fastify({
@@ -63,6 +55,19 @@ await app.register(fastifyStatic, {
 });
 
 // --------------------------------------------------
+// JOB SYSTEM
+// --------------------------------------------------
+
+const jobs = new Map();
+
+const JobStatus = {
+  QUEUED: "queued",
+  PROCESSING: "processing",
+  DONE: "done",
+  ERROR: "error",
+};
+
+// --------------------------------------------------
 // HELPERS
 // --------------------------------------------------
 
@@ -82,70 +87,7 @@ function cleanup(...files) {
   }
 }
 
-function runFFmpeg(input, output) {
-  return new Promise((resolve, reject) => {
-    const filters = [
-      "highpass=f=30",
-      "lowpass=f=18000",
-      "acompressor=threshold=-16dB:ratio=2:attack=20:release=200",
-      "loudnorm=I=-14:TP=-1.5:LRA=11",
-    ].join(",");
-
-    const args = [
-      "-y",
-
-      "-i",
-      input,
-
-      "-vn",
-
-      "-af",
-      filters,
-
-      "-ar",
-      "44100",
-
-      "-b:a",
-      "320k",
-
-      output,
-    ];
-
-    const ffmpeg = spawn("ffmpeg", args);
-
-    let stderr = "";
-
-    const timeout = setTimeout(() => {
-      ffmpeg.kill("SIGKILL");
-
-      reject(new Error("FFmpeg processing timeout"));
-    }, 1000 * 60 * 5);
-
-    ffmpeg.stderr.on("data", (data) => {
-      stderr += data.toString();
-    });
-
-    ffmpeg.on("error", (err) => {
-      clearTimeout(timeout);
-      reject(err);
-    });
-
-    ffmpeg.on("close", (code) => {
-      clearTimeout(timeout);
-
-      if (code !== 0) {
-        return reject(
-          new Error(`FFmpeg failed with code ${code}\n${stderr}`)
-        );
-      }
-
-      resolve();
-    });
-  });
-}
-function processJob(jobId, input, output) {
-  const job = jobs.get(jobId);
-
+function processJob(jobId, inputPath, outputPath) {
   const filters = [
     "highpass=f=30",
     "lowpass=f=18000",
@@ -155,18 +97,27 @@ function processJob(jobId, input, output) {
 
   const args = [
     "-y",
+
     "-i",
-    input,
+    inputPath,
+
+    "-vn",
+
     "-af",
     filters,
+
     "-progress",
     "pipe:1",
+
     "-nostats",
+
     "-ar",
     "44100",
+
     "-b:a",
     "320k",
-    output,
+
+    outputPath,
   ];
 
   const ffmpeg = spawn("ffmpeg", args);
@@ -174,39 +125,66 @@ function processJob(jobId, input, output) {
   let progress = 0;
 
   ffmpeg.stdout.on("data", () => {
-    progress = Math.min(progress + 1, 95);
+    progress = Math.min(progress + 5, 95);
+
+    const currentJob = jobs.get(jobId);
+
+    if (!currentJob) return;
 
     jobs.set(jobId, {
-      ...job,
+      ...currentJob,
       progress,
     });
   });
 
+  ffmpeg.stderr.on("data", (data) => {
+    console.log(data.toString());
+  });
+
   ffmpeg.on("close", (code) => {
+    const currentJob = jobs.get(jobId);
+
+    if (!currentJob) return;
+
     if (code === 0) {
       jobs.set(jobId, {
-        ...job,
+        ...currentJob,
         status: JobStatus.DONE,
         progress: 100,
       });
     } else {
       jobs.set(jobId, {
-        ...job,
+        ...currentJob,
         status: JobStatus.ERROR,
-        error: "FFmpeg failed",
+        error: "FFmpeg processing failed",
       });
     }
 
-    setTimeout(() => cleanup(input, output), 10 * 60 * 1000);
+    setTimeout(() => {
+      cleanup(inputPath, outputPath);
+    }, 1000 * 60 * 15);
+  });
+
+  ffmpeg.on("error", (err) => {
+    const currentJob = jobs.get(jobId);
+
+    if (!currentJob) return;
+
+    jobs.set(jobId, {
+      ...currentJob,
+      status: JobStatus.ERROR,
+      error: err.message,
+    });
   });
 }
+
 // --------------------------------------------------
 // ROUTES
 // --------------------------------------------------
 
 app.get("/", async () => {
   return {
-    status: "Audio mastering backend online",
+    status: "AI Mastering Backend Online",
   };
 });
 
@@ -217,63 +195,30 @@ app.get("/health", async () => {
     memory: process.memoryUsage(),
   };
 });
+
+app.get("/status/:id", async (req, reply) => {
+  const { id } = req.params;
+
+  const job = jobs.get(id);
+
+  if (!job) {
+    return reply.code(404).send({
+      error: "Job not found",
+    });
+  }
+
+  return job;
+});
+
 app.post("/master", async (req, reply) => {
   try {
     const file = await req.file();
 
     if (!file) {
-      return reply.code(400).send({ error: "No file uploaded" });
+      return reply.code(400).send({
+        error: "No file uploaded",
+      });
     }
-
-    return {
-      ok: true,
-    };
-
-  } catch (err) {
-    return reply.code(500).send({
-      error: err.message,
-    });
-  }
-});
-// --------------------------------------------------
-// MASTER ENDPOINT
-// --------------------------------------------------
-
-  const jobId = crypto.randomUUID();
-
-  jobs.set(jobId, {
-    id: jobId,
-    status: JobStatus.QUEUED,
-    progress: 0,
-    file: null,
-    error: null,
-  });
-
-  const uploadName = safeFilename(file.filename);
-  const outputName = `mastered-${uploadName}.mp3`;
-
-  const uploadPath = path.join(uploadDir, uploadName);
-  const outputPath = path.join(processedDir, outputName);
-
-  await pipeline(file.file, fs.createWriteStream(uploadPath));
-
-  jobs.set(jobId, {
-    ...jobs.get(jobId),
-    status: JobStatus.PROCESSING,
-    file: outputName,
-  });
-
-  processJob(jobId, uploadPath, outputPath);
-
-  return {
-    jobId,
-    statusUrl: `/status/${jobId}`,
-    downloadUrl: `/files/${outputName}`,
-  };
-});
-    // ----------------------------------------------
-    // MIME VALIDATION
-    // ----------------------------------------------
 
     const allowedMime = [
       "audio/mpeg",
@@ -291,20 +236,30 @@ app.post("/master", async (req, reply) => {
       });
     }
 
-    // ----------------------------------------------
-    // SAFE FILENAMES
-    // ----------------------------------------------
+    const jobId = crypto.randomUUID();
 
     const uploadName = safeFilename(file.filename);
 
-    const processedName = `mastered-${uploadName}.mp3`;
+    const outputName = `mastered-${uploadName}.mp3`;
 
-    uploadPath = path.join(uploadDir, uploadName);
+    const uploadPath = path.join(uploadDir, uploadName);
 
-    processedPath = path.join(processedDir, processedName);
+    const outputPath = path.join(processedDir, outputName);
 
     // ----------------------------------------------
-    // SAVE FILE STREAM
+    // CREATE JOB
+    // ----------------------------------------------
+
+    jobs.set(jobId, {
+      id: jobId,
+      status: JobStatus.QUEUED,
+      progress: 0,
+      file: outputName,
+      error: null,
+    });
+
+    // ----------------------------------------------
+    // SAVE FILE
     // ----------------------------------------------
 
     await pipeline(
@@ -312,49 +267,40 @@ app.post("/master", async (req, reply) => {
       fs.createWriteStream(uploadPath)
     );
 
-    req.log.info(`Upload saved: ${uploadPath}`);
-
     // ----------------------------------------------
-    // PROCESS AUDIO
+    // UPDATE JOB STATUS
     // ----------------------------------------------
 
-    await runFFmpeg(uploadPath, processedPath);
-
-    req.log.info(`Master complete: ${processedPath}`);
+    jobs.set(jobId, {
+      ...jobs.get(jobId),
+      status: JobStatus.PROCESSING,
+    });
 
     // ----------------------------------------------
-    // AUTO CLEANUP
+    // START FFMPEG
     // ----------------------------------------------
 
-    setTimeout(() => {
-      cleanup(uploadPath, processedPath);
-    }, 1000 * 60 * 15);
+    processJob(jobId, uploadPath, outputPath);
+
+    // ----------------------------------------------
+    // RESPONSE
+    // ----------------------------------------------
 
     return {
       success: true,
-      file: processedName,
-      downloadUrl: `/files/${processedName}`,
+      jobId,
+      statusUrl: `/status/${jobId}`,
+      downloadUrl: `/files/${outputName}`,
     };
-  } catch (err) {
-    req.log.error(err);
 
-    cleanup(uploadPath, processedPath);
+  } catch (err) {
+    console.error(err);
 
     return reply.code(500).send({
       error: "Processing failed",
       details: err.message || String(err),
     });
   }
-});
-
-app.get("/status/:id", async (req, reply) => {
-  const job = jobs.get(req.params.id);
-
-  if (!job) {
-    return reply.code(404).send({ error: "Job not found" });
-  }
-
-  return job;
 });
 
 // --------------------------------------------------
@@ -370,6 +316,7 @@ try {
   });
 
   console.log(`Server running on port ${PORT}`);
+
 } catch (err) {
   app.log.error(err);
 
