@@ -73,11 +73,7 @@ const JobStatus = {
   DONE: "done",
   ERROR: "error",
 };
-if (activeJobs >= MAX_CONCURRENT_JOBS) {
-  return reply.code(503).send({
-    error: "Server busy. Try again shortly.",
-  });
-}
+
 // --------------------------------------------------
 // HELPERS
 // --------------------------------------------------
@@ -155,7 +151,7 @@ function processJob(jobId, inputPath, outputPath) {
     jobs.set(jobId, {
       ...currentJob,
       progress,
-    });
+    }
   });
 
   ffmpeg.on("close", (code) => {
@@ -194,7 +190,7 @@ function processJob(jobId, inputPath, outputPath) {
       error: err.message,
     });
   });
-};
+}
 
     // -------------------------------
     // SAVE FILE
@@ -221,6 +217,86 @@ function processJob(jobId, inputPath, outputPath) {
     // RESPONSE
     // -------------------------------
 
+app.post("/master", async (req, reply) => {
+  try {
+
+    if (activeJobs >= MAX_CONCURRENT_JOBS) {
+      return reply.code(503).send({
+        error: "Server busy. Try again shortly.",
+      });
+    }
+
+    const file = await req.file();
+
+    if (!file) {
+      return reply.code(400).send({
+        error: "No file uploaded",
+      });
+    }
+
+    const allowedMime = [
+      "audio/mpeg",
+      "audio/wav",
+      "audio/x-wav",
+      "audio/flac",
+      "audio/mp4",
+      "audio/aac",
+      "audio/ogg",
+    ];
+
+    const allowedExtensions = [
+      ".mp3",
+      ".wav",
+      ".flac",
+      ".m4a",
+      ".aac",
+      ".ogg",
+    ];
+
+    if (!allowedMime.includes(file.mimetype)) {
+      return reply.code(400).send({
+        error: "Unsupported audio format",
+      });
+    }
+
+    const ext = path.extname(file.filename).toLowerCase();
+
+    if (!allowedExtensions.includes(ext)) {
+      return reply.code(400).send({
+        error: "Unsupported file extension",
+      });
+    }
+
+    const jobId = crypto.randomUUID();
+
+    const uploadName = safeFilename(file.filename);
+
+    const outputName = `mastered-${uploadName}.mp3`;
+
+    const uploadPath = path.join(uploadDir, uploadName);
+
+    const outputPath = path.join(processedDir, outputName);
+
+    jobs.set(jobId, {
+      id: jobId,
+      status: JobStatus.QUEUED,
+      progress: 0,
+      file: outputName,
+      error: null,
+    });
+
+    await pipeline(
+      file.file,
+      fs.createWriteStream(uploadPath)
+    );
+
+    jobs.set(jobId, {
+      ...jobs.get(jobId),
+      status: JobStatus.PROCESSING,
+    });
+
+    processJob(jobId, uploadPath, outputPath);
+
     return {
       success: true,
       jobId,
@@ -237,7 +313,7 @@ function processJob(jobId, inputPath, outputPath) {
     });
   }
 });
-
+    
 // --------------------------------------------------
 // START SERVER
 // --------------------------------------------------
