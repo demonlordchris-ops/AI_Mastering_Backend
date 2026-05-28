@@ -151,8 +151,7 @@ function processJob(jobId, inputPath, outputPath) {
     jobs.set(jobId, {
       ...currentJob,
       progress,
-    }
-  });
+    });
 
   ffmpeg.on("close", (code) => {
     activeJobs = Math.max(0, activeJobs - 1);
