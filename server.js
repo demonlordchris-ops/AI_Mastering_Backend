@@ -2,7 +2,7 @@ import Fastify from "fastify";
 import multipart from "@fastify/multipart";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
-
+import rateLimit from "@fastify/rate-limit";
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
@@ -42,6 +42,11 @@ await app.register(cors, {
   origin: true,
 });
 
+await app.register(rateLimit, {
+  max: 20,
+  timeWindow: "1 minute",
+});
+
 await app.register(multipart, {
   limits: {
     fileSize: 100 * 1024 * 1024,
@@ -59,14 +64,20 @@ await app.register(fastifyStatic, {
 // --------------------------------------------------
 
 const jobs = new Map();
+let activeJobs = 0;
 
+const MAX_CONCURRENT_JOBS = 2;
 const JobStatus = {
   QUEUED: "queued",
   PROCESSING: "processing",
   DONE: "done",
   ERROR: "error",
 };
-
+if (activeJobs >= MAX_CONCURRENT_JOBS) {
+  return reply.code(503).send({
+    error: "Server busy. Try again shortly.",
+  });
+}
 // --------------------------------------------------
 // HELPERS
 // --------------------------------------------------
@@ -95,6 +106,7 @@ function processJob(jobId, inputPath, outputPath) {
     "loudnorm=I=-14:TP=-1.5:LRA=11",
   ].join(",");
 
+
   const args = [
     "-y",
 
@@ -121,7 +133,23 @@ function processJob(jobId, inputPath, outputPath) {
   ];
 
   const ffmpeg = spawn("ffmpeg", args);
+activeJobs++;
+const timeout = setTimeout(() => {
+  console.error(`FFmpeg timeout for job ${jobId}`);
 
+  ffmpeg.kill("SIGKILL");
+
+  const currentJob = jobs.get(jobId);
+
+  if (!currentJob) return;
+
+  jobs.set(jobId, {
+    ...currentJob,
+    status: JobStatus.ERROR,
+    error: "Processing timeout",
+  });
+
+}, 1000 * 60 * 5);
   let progress = 0;
 
   ffmpeg.stdout.on("data", () => {
@@ -142,8 +170,10 @@ function processJob(jobId, inputPath, outputPath) {
   });
 
   ffmpeg.on("close", (code) => {
+activeJobs = Math.max(0, activeJobs - 1);
     const currentJob = jobs.get(jobId);
-
+    cleanup(inputPath, outputPath);
+    clearTimeout(timeout);
     if (!currentJob) return;
 
     if (code === 0) {
@@ -151,6 +181,8 @@ function processJob(jobId, inputPath, outputPath) {
         ...currentJob,
         status: JobStatus.DONE,
         progress: 100,
+
+
       });
     } else {
       jobs.set(jobId, {
@@ -166,8 +198,10 @@ function processJob(jobId, inputPath, outputPath) {
   });
 
   ffmpeg.on("error", (err) => {
+activeJobs = Math.max(0, activeJobs - 1);
     const currentJob = jobs.get(jobId);
-
+    clearTimeout(timeout);
+    cleanup(inputPath, outputPath);
     if (!currentJob) return;
 
     jobs.set(jobId, {
@@ -192,7 +226,9 @@ app.get("/health", async () => {
   return {
     status: "ok",
     uptime: process.uptime(),
+    activeJobs,
     memory: process.memoryUsage(),
+    cpuLoad: process.cpuUsage(),
   };
 });
 
@@ -229,13 +265,26 @@ app.post("/master", async (req, reply) => {
       "audio/aac",
       "audio/ogg",
     ];
-
+const allowedExtensions = [
+  ".mp3",
+  ".wav",
+  ".flac",
+  ".m4a",
+  ".aac",
+  ".ogg",
+];
     if (!allowedMime.includes(file.mimetype)) {
       return reply.code(400).send({
         error: "Unsupported audio format",
       });
     }
+const ext = path.extname(file.filename).toLowerCase();
 
+if (!allowedExtensions.includes(ext)) {
+  return reply.code(400).send({
+    error: "Unsupported file extension",
+  });
+}
     const jobId = crypto.randomUUID();
 
     const uploadName = safeFilename(file.filename);
