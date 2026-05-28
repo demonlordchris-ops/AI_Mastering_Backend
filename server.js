@@ -94,6 +94,23 @@ function cleanup(...files) {
   }
 }
 
+```js
+function safeFilename(originalName = "audio.mp3") {
+  const ext = path.extname(originalName) || ".mp3";
+
+  const random = crypto.randomBytes(8).toString("hex");
+
+  return `${Date.now()}-${random}${ext}`;
+}
+
+function cleanup(...files) {
+  for (const file of files) {
+    if (!file) continue;
+
+    fs.unlink(file, () => {});
+  }
+}
+
 function processJob(jobId, inputPath, outputPath) {
   const filters = [
     "highpass=f=30",
@@ -137,6 +154,7 @@ function processJob(jobId, inputPath, outputPath) {
       status: JobStatus.ERROR,
       error: "Processing timeout",
     });
+
   }, 1000 * 60 * 5);
 
   let progress = 0;
@@ -152,6 +170,11 @@ function processJob(jobId, inputPath, outputPath) {
       ...currentJob,
       progress,
     });
+  });
+
+  ffmpeg.stderr.on("data", (data) => {
+    console.log(data.toString());
+  });
 
   ffmpeg.on("close", (code) => {
     activeJobs = Math.max(0, activeJobs - 1);
@@ -164,13 +187,42 @@ function processJob(jobId, inputPath, outputPath) {
 
     if (!currentJob) return;
 
+    if (code === 0) {
+      jobs.set(jobId, {
+        ...currentJob,
+        status: JobStatus.DONE,
+        progress: 100,
+        error: null,
+      });
+    } else {
+      jobs.set(jobId, {
+        ...currentJob,
+        status: JobStatus.ERROR,
+        error: "FFmpeg processing failed",
+      });
+    }
+  });
+
+  ffmpeg.on("error", (err) => {
+    activeJobs = Math.max(0, activeJobs - 1);
+
+    clearTimeout(timeout);
+
+    cleanup(inputPath, outputPath);
+
+    const currentJob = jobs.get(jobId);
+
+    if (!currentJob) return;
+
     jobs.set(jobId, {
       ...currentJob,
-      status: code === 0 ? JobStatus.DONE : JobStatus.ERROR,
-      progress: code === 0 ? 100 : currentJob.progress,
-      error: code === 0 ? null : "FFmpeg processing failed",
+      status: JobStatus.ERROR,
+      error: err.message,
     });
   });
+}
+```
+
 
   ffmpeg.on("error", (err) => {
     activeJobs = Math.max(0, activeJobs - 1);
