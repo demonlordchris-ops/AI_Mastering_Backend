@@ -126,7 +126,7 @@ function processJob(jobId, inputPath, outputPath) {
   activeJobs++;
 
   const timeout = setTimeout(() => {
-    console.error(`FFmpeg timeout for job ${jobId}`);
+    console.error("FFmpeg timeout for job", jobId);
 
     ffmpeg.kill("SIGKILL");
 
