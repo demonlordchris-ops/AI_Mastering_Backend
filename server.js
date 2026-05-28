@@ -286,7 +286,7 @@ app.post("/master", async (req, reply) => {
 
     const uploadName = safeFilename(file.filename);
 
-    const outputName = `mastered-${uploadName}.mp3`;
+    const outputName = "mastered-" + uploadName + ".mp3";
 
     const uploadPath = path.join(uploadDir, uploadName);
 
