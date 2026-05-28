@@ -106,47 +106,44 @@ function processJob(jobId, inputPath, outputPath) {
     "loudnorm=I=-14:TP=-1.5:LRA=11",
   ].join(",");
 
-
   const args = [
     "-y",
-
     "-i",
     inputPath,
-
     "-vn",
-
     "-af",
     filters,
-
     "-progress",
     "pipe:1",
-
     "-nostats",
-
     "-ar",
     "44100",
-
     "-b:a",
     "320k",
-
     outputPath,
   ];
 
-function processJob(jobId, inputPath, outputPath) {
- const ffmpeg = spawn("ffmpeg", args);
+  const ffmpeg = spawn("ffmpeg", args);
+
   activeJobs++;
-   const timeout = setTimeout(() => {
+
+  const timeout = setTimeout(() => {
     console.error(`FFmpeg timeout for job ${jobId}`);
-     ffmpeg.kill("SIGKILL");
-      const currentJob = jobs.get(jobId);
-       if (!currentJob) return;
-        jobs.set(jobId, {
-         ...currentJob,
-          status: JobStatus.ERROR,
-           error: "Processing timeout",
-});
-}, 1000 * 60 * 5);
-let progress = 0;
+
+    ffmpeg.kill("SIGKILL");
+
+    const currentJob = jobs.get(jobId);
+
+    if (!currentJob) return;
+
+    jobs.set(jobId, {
+      ...currentJob,
+      status: JobStatus.ERROR,
+      error: "Processing timeout",
+    });
+  }, 1000 * 60 * 5);
+
+  let progress = 0;
 
   ffmpeg.stdout.on("data", () => {
     progress = Math.min(progress + 5, 95);
@@ -161,43 +158,34 @@ let progress = 0;
     });
   });
 
-  ffmpeg.stderr.on("data", (data) => {
-    console.log(data.toString());
-  });
-
   ffmpeg.on("close", (code) => {
-activeJobs = Math.max(0, activeJobs - 1);
-    const currentJob = jobs.get(jobId);
-    cleanup(inputPath, outputPath);
+    activeJobs = Math.max(0, activeJobs - 1);
+
     clearTimeout(timeout);
+
+    const currentJob = jobs.get(jobId);
+
+    cleanup(inputPath, outputPath);
+
     if (!currentJob) return;
 
-    if (code === 0) {
-      jobs.set(jobId, {
-        ...currentJob,
-        status: JobStatus.DONE,
-        progress: 100,
-
-
-      });
-    } else {
-      jobs.set(jobId, {
-        ...currentJob,
-        status: JobStatus.ERROR,
-        error: "FFmpeg processing failed",
-      });
-    }
-
-    setTimeout(() => {
-      cleanup(inputPath, outputPath);
-    }, 1000 * 60 * 15);
+    jobs.set(jobId, {
+      ...currentJob,
+      status: code === 0 ? JobStatus.DONE : JobStatus.ERROR,
+      progress: code === 0 ? 100 : currentJob.progress,
+      error: code === 0 ? null : "FFmpeg processing failed",
+    });
   });
 
   ffmpeg.on("error", (err) => {
-activeJobs = Math.max(0, activeJobs - 1);
-    const currentJob = jobs.get(jobId);
+    activeJobs = Math.max(0, activeJobs - 1);
+
     clearTimeout(timeout);
+
     cleanup(inputPath, outputPath);
+
+    const currentJob = jobs.get(jobId);
+
     if (!currentJob) return;
 
     jobs.set(jobId, {
@@ -206,134 +194,32 @@ activeJobs = Math.max(0, activeJobs - 1);
       error: err.message,
     });
   });
-}
+};
 
-// --------------------------------------------------
-// ROUTES
-// --------------------------------------------------
-
-app.get("/", async () => {
-  return {
-    status: "AI Mastering Backend Online",
-  };
-});
-
-app.get("/health", async () => {
-  return {
-    status: "ok",
-    uptime: process.uptime(),
-    activeJobs,
-    memory: process.memoryUsage(),
-    cpuLoad: process.cpuUsage(),
-  };
-});
-
-app.get("/status/:id", async (req, reply) => {
-  const { id } = req.params;
-
-  const job = jobs.get(id);
-
-  if (!job) {
-    return reply.code(404).send({
-      error: "Job not found",
-    });
-  }
-
-  return job;
-});
-
-app.post("/master", async (req, reply) => {
-  try {
-    const file = await req.file();
-
-    if (!file) {
-      return reply.code(400).send({
-        error: "No file uploaded",
-      });
-    }
-
-    const allowedMime = [
-      "audio/mpeg",
-      "audio/wav",
-      "audio/x-wav",
-      "audio/flac",
-      "audio/mp4",
-      "audio/aac",
-      "audio/ogg",
-    ];
-
-    const allowedExtensions = [
-      ".mp3",
-      ".wav",
-      ".flac",
-      ".m4a",
-      ".aac",
-      ".ogg",
-    ];
-
-    if (!allowedMime.includes(file.mimetype)) {
-      return reply.code(400).send({
-        error: "Unsupported audio format",
-      });
-    }
-
-    const ext = path.extname(file.filename).toLowerCase();
-
-    if (!allowedExtensions.includes(ext)) {
-      return reply.code(400).send({
-        error: "Unsupported file extension",
-      });
-    }
-
-    const jobId = crypto.randomUUID();
-
-    const uploadName = safeFilename(file.filename);
-
-    const outputName = `mastered-${uploadName}.mp3`;
-
-    const uploadPath = path.join(uploadDir, uploadName);
-
-    const outputPath = path.join(processedDir, outputName);
-
-    // ----------------------------------------------
-    // CREATE JOB
-    // ----------------------------------------------
-
-    jobs.set(jobId, {
-      id: jobId,
-      status: JobStatus.QUEUED,
-      progress: 0,
-      file: outputName,
-      error: null,
-    });
-
-    // ----------------------------------------------
+    // -------------------------------
     // SAVE FILE
-    // ----------------------------------------------
+    // -------------------------------
 
-    await pipeline(
-      file.file,
-      fs.createWriteStream(uploadPath)
-    );
+    await pipeline(file.file, fs.createWriteStream(uploadPath));
 
-    // ----------------------------------------------
-    // UPDATE JOB STATUS
-    // ----------------------------------------------
+    // -------------------------------
+    // UPDATE STATUS
+    // -------------------------------
 
     jobs.set(jobId, {
       ...jobs.get(jobId),
       status: JobStatus.PROCESSING,
     });
 
-    // ----------------------------------------------
+    // -------------------------------
     // START FFMPEG
-    // ----------------------------------------------
+    // -------------------------------
 
     processJob(jobId, uploadPath, outputPath);
 
-    // ----------------------------------------------
+    // -------------------------------
     // RESPONSE
-    // ----------------------------------------------
+    // -------------------------------
 
     return {
       success: true,
