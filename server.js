@@ -183,11 +183,8 @@ app.post("/master", async (req, reply) => {
     const file = await req.file();
 
     if (!file) {
-      return reply.code(400).send({
-        error: "No file uploaded",
-      });
-    }
-    const allowedMime = [
+      return reply.code(400).send({ error: "No file uploaded" });
+    }    const allowedMime = [
       "audio/mpeg",
       "audio/wav",
       "audio/x-wav",
@@ -246,18 +243,12 @@ app.post("/master", async (req, reply) => {
     processJob(jobId, uploadPath, outputPath);
 
     return {
-      success: true,
-      jobId,
-      statusUrl: `/status/${jobId}`,
-      downloadUrl: `/files/${outputName}`,
+      success: true
     };
 
   } catch (err) {
-    console.error(err);
-
     return reply.code(500).send({
-      error: "Processing failed",
-      details: err.message || String(err),
+      error: err.message
     });
   }
 });
