@@ -186,28 +186,7 @@ function processJob(jobId, inputPath, outputPath) {
         error: "FFmpeg processing failed",
       });
     }
-  });
-
-  ffmpeg.on("error", (err) => {
-    activeJobs = Math.max(0, activeJobs - 1);
-
-    clearTimeout(timeout);
-
-    cleanup(inputPath, outputPath);
-
-    const currentJob = jobs.get(jobId);
-
-    if (!currentJob) return;
-
-    jobs.set(jobId, {
-      ...currentJob,
-      status: JobStatus.ERROR,
-      error: err.message,
-    });
-  });
-}
-```
-
+  };
 
   ffmpeg.on("error", (err) => {
     activeJobs = Math.max(0, activeJobs - 1);
@@ -226,7 +205,7 @@ function processJob(jobId, inputPath, outputPath) {
       error: err.message,
     });
   })
-}
+};
 
     // -------------------------------
     // SAVE FILE
