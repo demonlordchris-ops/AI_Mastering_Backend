@@ -233,7 +233,11 @@ function processJob(jobId, inputPath, outputPath) {
 // --------------------------------------------------
 // START SERVER
 // --------------------------------------------------
-
+app.get("/", async () => {
+  return {
+    status: "AI Mastering Backend Online",
+  };
+});
 const PORT = process.env.PORT || 3001;
 
 try {
