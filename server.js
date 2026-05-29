@@ -139,31 +139,8 @@ function processJob(jobId, inputPath, outputPath) {
   });
   }
 
-    // -------------------------------
-    // SAVE FILE
-    // -------------------------------
-
-
-    // -------------------------------
-    // UPDATE STATUS
-    // -------------------------------
-
-   jobs.set(jobId, {
-      ...jobs.get(jobId),
-      status: JobStatus.PROCESSING,
-    });
-
-    // -------------------------------
-    // START FFMPEG
-    // -------------------------------
-
-    processJob(jobId, uploadPath, outputPath);
-
-    // -------------------------------
-    // RESPONSE
-    // -------------------------------
-
-app.post("/master", async (req, reply) => {
+   
+ app.post("/master", async (req, reply) => {
   try {
     const file = await req.file();
 
