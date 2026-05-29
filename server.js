@@ -184,7 +184,9 @@ app.post("/master", async (req, reply) => {
 
     if (!file) {
       return reply.code(400).send({ error: "No file uploaded" });
-    }    const allowedMime = [
+}
+
+const allowedMime = [
       "audio/mpeg",
       "audio/wav",
       "audio/x-wav",
