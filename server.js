@@ -143,13 +143,12 @@ function processJob(jobId, inputPath, outputPath) {
     // SAVE FILE
     // -------------------------------
 
-    await pipeline(file.file, fs.createWriteStream(uploadPath));
 
     // -------------------------------
     // UPDATE STATUS
     // -------------------------------
 
-    jobs.set(jobId, {
+   jobs.set(jobId, {
       ...jobs.get(jobId),
       status: JobStatus.PROCESSING,
     });
