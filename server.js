@@ -137,21 +137,7 @@ function processJob(jobId, inputPath, outputPath) {
     activeJobs = Math.max(0, activeJobs - 1);
     clearTimeout(timeout);
   });
-}
-
-    cleanup(inputPath, outputPath);
-
-    const currentJob = jobs.get(jobId);
-
-    if (!currentJob) return;
-
-    jobs.set(jobId, {
-      ...currentJob,
-      status: JobStatus.ERROR,
-      error: err.message,
-    });
-  });
-};
+  }
 
     // -------------------------------
     // SAVE FILE
