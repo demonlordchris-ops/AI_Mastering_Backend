@@ -261,10 +261,10 @@ app.post("/master", async (req, reply) => {
   } catch (err) {
     console.error(err);
 
-    return reply.code(500).send({
+     return reply.code(500).send({
       error: "Processing failed",
       details: err.message || String(err),
-    });
+   });
   }
 });
     
