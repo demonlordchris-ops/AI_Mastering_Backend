@@ -183,10 +183,12 @@ app.post("/master", async (req, reply) => {
     const file = await req.file();
 
     if (!file) {
-      return reply.code(400).send({ error: "No file uploaded" });
-}
+      return reply.code(400).send({
+        error: "No file uploaded",
+      });
+    }
 
-const allowedMime = [
+    const allowedMime = [
       "audio/mpeg",
       "audio/wav",
       "audio/x-wav",
@@ -222,9 +224,11 @@ const allowedMime = [
     const jobId = crypto.randomUUID();
 
     const uploadName = safeFilename(file.filename);
+
     const outputName = "mastered-" + uploadName + ".mp3";
 
     const uploadPath = path.join(uploadDir, uploadName);
+
     const outputPath = path.join(processedDir, outputName);
 
     jobs.set(jobId, {
@@ -235,7 +239,10 @@ const allowedMime = [
       error: null,
     });
 
-    await pipeline(file.file, fs.createWriteStream(uploadPath));
+    await pipeline(
+      file.file,
+      fs.createWriteStream(uploadPath)
+    );
 
     jobs.set(jobId, {
       ...jobs.get(jobId),
@@ -245,12 +252,18 @@ const allowedMime = [
     processJob(jobId, uploadPath, outputPath);
 
     return {
-      success: true
+      success: true,
+      jobId,
+      statusUrl: `/status/${jobId}`,
+      downloadUrl: `/files/${outputName}`,
     };
 
   } catch (err) {
+    console.error(err);
+
     return reply.code(500).send({
-      error: err.message
+      error: "Processing failed",
+      details: err.message || String(err),
     });
   }
 });
