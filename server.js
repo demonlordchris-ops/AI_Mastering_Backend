@@ -251,7 +251,7 @@ app.post("/master", async (req, reply) => {
 
     processJob(jobId, uploadPath, outputPath);
 
-    return {
+     return {
       success: true,
       jobId,
       statusUrl: `/status/${jobId}`,
